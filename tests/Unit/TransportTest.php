@@ -302,7 +302,7 @@ final class TransportTest extends TestCase
     {
         $client = $this->client([new Psr7Response(204)]);
 
-        $response = $client->entities('supporter')->delete(7);
+        $response = $client->request('POST', 'something_custom');
 
         self::assertSame(204, $response->status);
         self::assertNull($response->entityId());

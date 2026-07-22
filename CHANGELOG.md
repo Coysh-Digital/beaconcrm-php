@@ -2,15 +2,14 @@
 
 ## 1.0.0 - 2026-07-22
 
-Every endpoint below has been exercised against a live Beacon account, apart
-from delete and the export endpoints — see the README's endpoint confidence
-table.
+Every endpoint has been exercised against a live Beacon account, apart from the
+export endpoints. See the README's endpoint confidence table.
 
 ### Added
 
 - Initial release.
 - `BeaconClient` for reading an account's schema and creating, reading,
-  updating, upserting, listing and deleting records.
+  updating, upserting and listing records.
 - Schema objects (`EntityType`, `Field`, `FieldType`) built from the account's
   own `entity_types` response, so custom record types and `c_*` fields need no
   configuration.

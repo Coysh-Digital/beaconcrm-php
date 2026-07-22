@@ -131,12 +131,6 @@ final class RequestBuildingTest extends TestCase
         self::assertSame('entity/supporter/7', $update->path);
     }
 
-    public function testDeleteTargetsTheRecord(): void
-    {
-        self::assertSame('DELETE', $this->supporters()->deleteRequest(7)->method);
-        self::assertSame('entity/supporter/7', $this->supporters()->deleteRequest(7)->path);
-    }
-
     /**
      * Listing lives at the plural `entities/{type}`, unlike every single-record
      * operation. A GET to `entity/{type}` is not a list.

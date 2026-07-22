@@ -19,8 +19,8 @@ use CoyshDigital\Beacon\Schema\EntityType;
  * {@see Request}, for hosts that need to do their own sending.
  *
  * Create, read, update, upsert and list have all been exercised against a live
- * Beacon account. Delete has not — see {@see delete()}. Beacon has no search or
- * filter endpoint that could be found; filter a list client-side, or use
+ * Beacon account. Beacon has no search or filter endpoint that could be found:
+ * filter a list client-side, or use
  * {@see \CoyshDigital\Beacon\BeaconClient::request()} if your account exposes
  * something this library does not model.
  */
@@ -123,31 +123,6 @@ final class Entities
     public function updateRequest(int|string $id, array|EntityPayload $entity): Request
     {
         return new Request('PATCH', $this->endpoint($id), body: $this->body($entity));
-    }
-
-    // Delete
-    // =========================================================================
-
-    /**
-     * @experimental This is the one endpoint here that has not been confirmed
-     *               against a live account, because confirming it means
-     *               destroying a record. Beacon's own model is archiving rather
-     *               than deletion, and the sibling endpoints did not all follow
-     *               REST convention — update needed PATCH, not PUT — so do not
-     *               assume this path is right. Try it on a throwaway record
-     *               first.
-     */
-    public function delete(int|string $id): Response
-    {
-        return $this->transport()->send($this->deleteRequest($id));
-    }
-
-    /**
-     * @experimental See delete().
-     */
-    public function deleteRequest(int|string $id): Request
-    {
-        return new Request('DELETE', $this->endpoint($id));
     }
 
     // Upsert
