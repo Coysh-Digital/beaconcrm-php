@@ -2,6 +2,10 @@
 
 ## 1.0.0 - 2026-07-22
 
+Every endpoint below has been exercised against a live Beacon account, apart
+from delete and the export endpoints — see the README's endpoint confidence
+table.
+
 ### Added
 
 - Initial release.
@@ -18,3 +22,4 @@
   server errors, honouring `Retry-After`.
 - Unsent `Request` objects, for hosts that need to do their own sending.
 - CSV export triggering and polling.
+- Paged listing via `list()` and `each()`, which walks every page for you.

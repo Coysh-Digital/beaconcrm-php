@@ -59,7 +59,8 @@ final class Response
     }
 
     /**
-     * The records from a list response.
+     * The raw rows of a list response. Each is an `{entity, references}`
+     * envelope of its own — {@see entities()} for just the records.
      *
      * @return list<mixed>
      */
@@ -68,6 +69,41 @@ final class Response
         $results = $this->data['results'] ?? [];
 
         return is_array($results) ? array_values($results) : [];
+    }
+
+    /**
+     * The records from a list response, unwrapped from their envelopes.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function entities(): array
+    {
+        $entities = [];
+
+        foreach ($this->results() as $result) {
+            if (!is_array($result)) {
+                continue;
+            }
+
+            // A list row wraps its record; a plain record is taken as-is.
+            $entity = $result['entity'] ?? $result;
+
+            if (is_array($entity)) {
+                $entities[] = $entity;
+            }
+        }
+
+        return $entities;
+    }
+
+    /**
+     * How many records match in total, not just on this page.
+     */
+    public function total(): int
+    {
+        $total = $this->data['total'] ?? null;
+
+        return is_numeric($total) ? (int)$total : count($this->results());
     }
 
     /**

@@ -18,12 +18,11 @@ use CoyshDigital\Beacon\Schema\EntityType;
  * Every method that sends has a `…Request()` twin returning the unsent
  * {@see Request}, for hosts that need to do their own sending.
  *
- * Endpoint confidence: create, read and upsert are confirmed against Beacon's
- * account documentation. Update, delete, list and search follow REST convention
- * and Beacon's general shape but are not in any documentation available when
- * this was written — they are marked `@experimental` and may need adjusting
- * against your account's generated docs. {@see \CoyshDigital\Beacon\BeaconClient::request()}
- * is the escape hatch until then.
+ * Create, read, update, upsert and list have all been exercised against a live
+ * Beacon account. Delete has not — see {@see delete()}. Beacon has no search or
+ * filter endpoint that could be found; filter a list client-side, or use
+ * {@see \CoyshDigital\Beacon\BeaconClient::request()} if your account exposes
+ * something this library does not model.
  */
 final class Entities
 {
@@ -107,10 +106,9 @@ final class Entities
     // =========================================================================
 
     /**
-     * @experimental The update endpoint is inferred from REST convention, not
-     *               from Beacon documentation. Verify against your account's
-     *               generated docs before relying on it; upsert() is the
-     *               documented way to change an existing record.
+     * Updates one record, leaving any field not in the payload untouched.
+     *
+     * Note the verb: Beacon takes a PATCH here and answers `PUT` with a 404.
      *
      * @param array<string, mixed>|EntityPayload $entity
      */
@@ -120,23 +118,24 @@ final class Entities
     }
 
     /**
-     * @experimental See update().
-     *
      * @param array<string, mixed>|EntityPayload $entity
      */
     public function updateRequest(int|string $id, array|EntityPayload $entity): Request
     {
-        return new Request('PUT', $this->endpoint($id), body: $this->body($entity));
+        return new Request('PATCH', $this->endpoint($id), body: $this->body($entity));
     }
 
     // Delete
     // =========================================================================
 
     /**
-     * @experimental The delete endpoint is inferred from REST convention, not
-     *               from Beacon documentation. Beacon's own model is archiving
-     *               rather than deletion, so check what this actually does on a
-     *               test record before running it over real data.
+     * @experimental This is the one endpoint here that has not been confirmed
+     *               against a live account, because confirming it means
+     *               destroying a record. Beacon's own model is archiving rather
+     *               than deletion, and the sibling endpoints did not all follow
+     *               REST convention — update needed PATCH, not PUT — so do not
+     *               assume this path is right. Try it on a throwaway record
+     *               first.
      */
     public function delete(int|string $id): Response
     {
@@ -192,58 +191,85 @@ final class Entities
         ]);
     }
 
-    // List and search
+    // List
     // =========================================================================
 
     /**
-     * @experimental The list endpoint and its pagination parameters are
-     *               inferred; confirm the parameter names against your
-     *               account's generated docs.
+     * Lists records of this type, newest first.
+     *
+     * Note the endpoint: listing lives at the **plural** `entities/{type}`,
+     * while every single-record operation is at `entity/{type}`. Beacon answers
+     * a GET to `entity/{type}` with a permissions error rather than a list.
+     *
+     * The response carries `total` alongside the page of results, and each
+     * result is an `{entity, references}` envelope — {@see Response::entities()}
+     * unwraps them.
+     *
+     * Pass `populate: false` for large exports; linked-record data makes the
+     * response substantially bigger.
      *
      * @param array<string, scalar|null> $query
      */
-    public function list(array $query = [], ?bool $populate = null, ?bool $archived = null): Response
-    {
-        return $this->transport()->send($this->listRequest($query, $populate, $archived));
+    public function list(
+        int $page = 1,
+        ?int $perPage = null,
+        ?bool $populate = null,
+        ?bool $archived = null,
+        array $query = [],
+    ): Response {
+        return $this->transport()->send($this->listRequest($page, $perPage, $populate, $archived, $query));
     }
 
     /**
-     * @experimental See list().
-     *
      * @param array<string, scalar|null> $query
      */
-    public function listRequest(array $query = [], ?bool $populate = null, ?bool $archived = null): Request
-    {
-        return new Request('GET', $this->endpoint(), array_merge(self::flags($populate, $archived), $query));
-    }
+    public function listRequest(
+        int $page = 1,
+        ?int $perPage = null,
+        ?bool $populate = null,
+        ?bool $archived = null,
+        array $query = [],
+    ): Request {
+        $params = ['page' => $page];
 
-    /**
-     * @experimental Beacon documents a filtering system but not its API request
-     *               shape, so both the endpoint and the body are inferred.
-     *               Verify before relying on it.
-     *
-     * @param array<string, mixed> $filter
-     * @param array<string, scalar|null> $query
-     */
-    public function search(array $filter, array $query = [], ?bool $populate = null): Response
-    {
-        return $this->transport()->send($this->searchRequest($filter, $query, $populate));
-    }
+        // Beacon's own default page size is 200.
+        if ($perPage !== null) {
+            $params['per_page'] = $perPage;
+        }
 
-    /**
-     * @experimental See search().
-     *
-     * @param array<string, mixed> $filter
-     * @param array<string, scalar|null> $query
-     */
-    public function searchRequest(array $filter, array $query = [], ?bool $populate = null): Request
-    {
         return new Request(
-            'POST',
-            $this->endpoint() . '/search',
-            array_merge(self::flags($populate, null), $query),
-            ['filter' => $filter],
+            'GET',
+            'entities/' . rawurlencode($this->typeKey),
+            array_merge($params, self::flags($populate, $archived), $query),
         );
+    }
+
+    /**
+     * Every record of this type, fetched a page at a time.
+     *
+     * Yields one record per iteration, so a large account can be walked without
+     * holding it all in memory. Mind the rate limit — 300 requests a minute —
+     * and prefer a large `$perPage` over a small one.
+     *
+     * @return \Generator<int, array<string, mixed>>
+     */
+    public function each(int $perPage = 200, ?bool $populate = null, ?bool $archived = null): \Generator
+    {
+        $page = 1;
+        $seen = 0;
+
+        do {
+            $response = $this->list($page, $perPage, $populate, $archived);
+            $entities = $response->entities();
+
+            foreach ($entities as $entity) {
+                $seen++;
+
+                yield $entity;
+            }
+
+            $page++;
+        } while ($entities !== [] && $seen < $response->total());
     }
 
     // Internals

@@ -130,6 +130,66 @@ final class TransportTest extends TestCase
         self::assertSame('supporter', $types[1]->key);
     }
 
+    /**
+     * A list response wraps each record in its own {entity, references}
+     * envelope and reports the full match count alongside the page.
+     */
+    public function testListUnwrapsItsEnvelopesAndReportsTheTotal(): void
+    {
+        $client = $this->client([$this->json(200, [
+            'total' => 39713,
+            'data_source' => 1,
+            'results' => [
+                ['entity' => ['id' => 1, 'job_title' => 'Trustee'], 'references' => []],
+                ['entity' => ['id' => 2], 'references' => []],
+            ],
+        ])]);
+
+        $response = $client->entities('supporter')->list(page: 2, perPage: 2);
+
+        self::assertSame(39713, $response->total());
+        self::assertSame([['id' => 1, 'job_title' => 'Trustee'], ['id' => 2]], $response->entities());
+        self::assertCount(2, $response->results());
+        self::assertSame('/v1/account/12345/entities/supporter', $this->sentRequest(0)->getUri()->getPath());
+        self::assertSame('page=2&per_page=2', $this->sentRequest(0)->getUri()->getQuery());
+    }
+
+    public function testEachWalksEveryPageUntilTheTotalIsReached(): void
+    {
+        $page = static fn(array $ids) => [
+            'total' => 5,
+            'results' => array_map(static fn(int $id) => ['entity' => ['id' => $id]], $ids),
+        ];
+
+        $client = $this->client([
+            $this->json(200, $page([1, 2])),
+            $this->json(200, $page([3, 4])),
+            $this->json(200, $page([5])),
+        ], new RetryPolicy(maxAttempts: 1));
+
+        $ids = [];
+
+        foreach ($client->entities('supporter')->each(perPage: 2) as $entity) {
+            $ids[] = $entity['id'];
+        }
+
+        self::assertSame([1, 2, 3, 4, 5], $ids);
+        self::assertCount(3, $this->sent);
+    }
+
+    public function testEachStopsWhenAPageComesBackEmpty(): void
+    {
+        $client = $this->client([
+            $this->json(200, ['total' => 99, 'results' => [['entity' => ['id' => 1]]]]),
+            $this->json(200, ['total' => 99, 'results' => []]),
+        ], new RetryPolicy(maxAttempts: 1));
+
+        $ids = iterator_to_array($client->entities('supporter')->each(perPage: 1), false);
+
+        self::assertSame([['id' => 1]], $ids);
+        self::assertCount(2, $this->sent);
+    }
+
     public function testPingReportsWorkingCredentials(): void
     {
         self::assertTrue($this->client([$this->json(200, ['results' => []])])->ping());

@@ -120,25 +120,39 @@ final class RequestBuildingTest extends TestCase
         self::assertSame('entity/supporter/1988', $request->uri());
     }
 
-    public function testUpdateAndDeleteTargetTheRecord(): void
+    /**
+     * Beacon answers a PUT here with a 404; the update verb is PATCH.
+     */
+    public function testUpdateUsesPatchAndTargetsTheRecord(): void
     {
-        self::assertSame('PUT', $this->supporters()->updateRequest(7, ['job_title' => 'Chair'])->method);
-        self::assertSame('entity/supporter/7', $this->supporters()->deleteRequest(7)->path);
-        self::assertSame('DELETE', $this->supporters()->deleteRequest(7)->method);
+        $update = $this->supporters()->updateRequest(7, ['job_title' => 'Chair']);
+
+        self::assertSame('PATCH', $update->method);
+        self::assertSame('entity/supporter/7', $update->path);
     }
 
-    public function testListAndSearchBuildTheirRequests(): void
+    public function testDeleteTargetsTheRecord(): void
     {
-        $list = $this->supporters()->listRequest(['page' => 2], populate: false);
+        self::assertSame('DELETE', $this->supporters()->deleteRequest(7)->method);
+        self::assertSame('entity/supporter/7', $this->supporters()->deleteRequest(7)->path);
+    }
 
-        self::assertSame('entity/supporter', $list->path);
-        self::assertSame(['populate' => 'false', 'page' => 2], $list->query);
+    /**
+     * Listing lives at the plural `entities/{type}`, unlike every single-record
+     * operation. A GET to `entity/{type}` is not a list.
+     */
+    public function testListUsesThePluralEndpointAndPaginates(): void
+    {
+        $list = $this->supporters()->listRequest(page: 2, perPage: 50, populate: false);
 
-        $search = $this->supporters()->searchRequest(['operator' => 'and', 'conditions' => []]);
+        self::assertSame('GET', $list->method);
+        self::assertSame('entities/supporter', $list->path);
+        self::assertSame(['page' => 2, 'per_page' => 50, 'populate' => 'false'], $list->query);
+    }
 
-        self::assertSame('POST', $search->method);
-        self::assertSame('entity/supporter/search', $search->path);
-        self::assertSame(['operator' => 'and', 'conditions' => []], $this->body($search)['filter']);
+    public function testListDefaultsToTheFirstPageAndBeaconsOwnPageSize(): void
+    {
+        self::assertSame(['page' => 1], $this->supporters()->listRequest()->query);
     }
 
     public function testRecordTypeKeysAreUrlEncoded(): void

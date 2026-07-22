@@ -164,6 +164,13 @@ $response = $people->read(1988, archived: true);
 
 ## Updating and upserting
 
+A plain update leaves any field not in the payload untouched. Note the verb:
+Beacon takes a `PATCH` here and answers a `PUT` with a 404.
+
+```php
+$people->update(1988, $people->payload()->set('c_tier', 'Gold'));
+```
+
 Upsert creates a record, or updates the one whose lookup field matches. It is
 the documented way to avoid duplicates from repeat submissions:
 
@@ -191,27 +198,51 @@ An email address is the obvious key for people, but it is also mutable. For
 migrations and repeatable imports, a stable legacy or external ID makes a far
 better one.
 
-There is also a direct `update()`, but see
-[Endpoint confidence](#endpoint-confidence) before relying on it.
+## Listing records
 
-## Listing, filtering and deleting
+Listing lives at the **plural** `entities/{type}`, unlike every single-record
+operation. The response reports the full match count alongside one page of
+results, and each result arrives in its own `{entity, references}` envelope,
+which `entities()` unwraps:
 
 ```php
-use CoyshDigital\Beacon\Filter\FilterBuilder;
+$response = $people->list(page: 1, perPage: 100, populate: false);
 
-$response = $people->list(['page' => 2], populate: false);
+$response->total();     // 39713 — the whole match count, not the page
+$response->entities();  // the records, unwrapped
+```
 
-$response = $people->search(
-    FilterBuilder::all()
-        ->where('c_tier', 'eq', 'Gold')
-        ->toArray()
-);
+Beacon's own default page size is 200. To walk everything without holding it in
+memory, `each()` pages for you:
 
+```php
+foreach ($people->each(perPage: 200, populate: false) as $person) {
+    echo $person['id'];
+}
+```
+
+Pass `archived: true` to include archived records — on a real account that can
+be a large jump, since archived records outnumber live ones.
+
+`populate: false` is worth setting for any bulk read; linked-record data makes
+responses substantially bigger.
+
+### No search endpoint
+
+Beacon's guide describes a filtering system, but no corresponding API endpoint
+could be found — `entity/{type}/search`, `/list` and `/filter` all 404. Filter a
+list client-side, or use [`request()`](#anything-else) if your account exposes
+something this library does not model.
+
+## Deleting
+
+```php
 $people->delete(1988);
 ```
 
-These four are the least certain part of the library — again, see
-[Endpoint confidence](#endpoint-confidence).
+This is the one call here that has not been confirmed against a live account,
+because confirming it means destroying a record. See
+[Endpoint confidence](#endpoint-confidence) before using it.
 
 ## Exports
 
@@ -247,7 +278,7 @@ converts your values so you do not have to think about it:
 | Checkbox | A JSON boolean |
 | Number, percent, rating | A JSON number |
 | Currency | An object, `{"value": 25.5}` |
-| Date | An ISO date, such as `2026-07-21` |
+| Date | An ISO date, such as `2026-07-21`. Read back, Beacon returns it as a full ISO 8601 timestamp |
 
 Person names are addressed one part at a time — `name:full`, `name:first`,
 `name:last`, `name:middle`, `name:prefix` — and reassembled into a single object
@@ -310,9 +341,11 @@ try {
     $people->create($payload);
 } catch (ApiException $e) {
     $e->getStatus();     // 500
-    $e->getErrorCode();  // unknown_error
+    $e->getErrorCode();  // server_error
     $e->getMessage();    // Oh shoot! An unknown error occurred.
-    $e->getRaw();        // Validation error: "emails": 0   ← the useful one
+    // ↓ the useful one
+    $e->getRaw();        // Validation error: "gender": 0 Invalid option.
+                         // Allowed options: Male, Female, Non-binary, …
     $e->getPayload();    // what was sent, credentials redacted
     $e->getSummary();    // all of the above on one line, for a log
 }
@@ -375,24 +408,34 @@ $response->toArray();
 ## Endpoint confidence
 
 Beacon's full API documentation is generated per account and sits behind a
-login, so not every endpoint here could be verified against it.
+login. Everything below has been exercised against a live account, with one
+exception.
 
 | Endpoint | Status |
 | --- | --- |
-| `GET entity_types` | Verified |
-| `POST entity/{type}` | Verified |
-| `GET entity/{type}/{id}` | Verified |
-| `PUT entity/{type}/upsert` | Verified |
-| `POST entity_export/trigger`, `GET entity_exports` | Documented by Beacon as early access |
-| `PUT entity/{type}/{id}` (update) | **Inferred** from REST convention |
-| `DELETE entity/{type}/{id}` | **Inferred**; Beacon's own model is archiving, not deletion |
-| `GET entity/{type}` (list) | **Inferred**, including its pagination parameters |
-| `POST entity/{type}/search` | **Inferred**, including the filter body shape |
+| `GET entity_types` | Verified live |
+| `POST entity/{type}` | Verified live |
+| `GET entity/{type}/{id}` | Verified live |
+| `PATCH entity/{type}/{id}` | Verified live |
+| `PUT entity/{type}/upsert` | Verified live |
+| `GET entities/{type}` (list) | Verified live, with `page` and `per_page` |
+| `DELETE entity/{type}/{id}` | **Unverified** — see below |
+| `POST entity_export/trigger`, `GET entity_exports` | Documented by Beacon as early access; not exercised here |
 
-The inferred ones are marked `@experimental` in the source. Check them against
-your account's own documentation at
-[developers.beaconcrm.org](https://developers.beaconcrm.org) before relying on
-them, and use `request()` in the meantime. Corrections are very welcome.
+`DELETE` is the one call that could not be confirmed without destroying a
+record. Do not assume it is right: the sibling endpoints did not all follow REST
+convention, and two guesses that looked obvious turned out to be wrong.
+
+Paths that do **not** exist, in case you were about to try them:
+
+- `PUT entity/{type}/{id}` — 404. Updates are `PATCH`.
+- `GET entity/{type}` — a permissions error, not a list. Listing is the plural
+  `entities/{type}`.
+- `POST entity/{type}/search`, `/list`, `/filter` — all 404. There is no search
+  endpoint.
+
+Corrections from other accounts are very welcome, especially for `DELETE` and
+the export endpoints.
 
 ## Testing
 
