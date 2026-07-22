@@ -1,0 +1,55 @@
+{
+    "name": "coyshdigital/beaconcrm-php",
+    "description": "PHP client for the Beacon CRM API — schema discovery, entity CRUD and upsert, with the field shaping Beacon expects.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "beacon",
+        "beacon crm",
+        "beaconcrm",
+        "crm",
+        "api",
+        "client",
+        "sdk"
+    ],
+    "authors": [
+        {
+            "name": "Coysh Digital",
+            "homepage": "https://coysh.digital"
+        }
+    ],
+    "support": {
+        "email": "support@coysh.digital",
+        "issues": "https://github.com/Coysh-Digital/beaconcrm-php/issues",
+        "source": "https://github.com/Coysh-Digital/beaconcrm-php"
+    },
+    "require": {
+        "php": ">=8.2",
+        "ext-json": "*",
+        "guzzlehttp/guzzle": "^7.5",
+        "psr/http-message": "^1.1 || ^2.0"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "CoyshDigital\\Beacon\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "CoyshDigital\\Beacon\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "phpstan": "phpstan analyse --memory-limit=1G"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

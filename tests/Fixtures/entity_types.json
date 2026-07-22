@@ -1,0 +1,52 @@
+{
+  "results": [
+    {
+      "key": "supporter",
+      "label": "Supporter",
+      "fields": [
+        { "key": "name", "label": "Name", "type": "person_name" },
+        { "key": "emails", "label": "Email", "type": "email", "metadata": { "allow_multiple": true } },
+        { "key": "phone_numbers", "label": "Phone", "type": "phone", "metadata": { "allow_multiple": true } },
+        { "key": "job_title", "label": "Job title", "type": "string" },
+        { "key": "notes", "label": "Notes", "type": "text" },
+        { "key": "website", "label": "Website", "type": "url" },
+        { "key": "joined_on", "label": "Joined on", "type": "date" },
+        { "key": "last_seen_at", "label": "Last seen", "type": "date", "metadata": { "include_time": true } },
+        { "key": "is_active", "label": "Active?", "type": "boolean" },
+        { "key": "visit_count", "label": "Visits", "type": "number" },
+        { "key": "satisfaction", "label": "Satisfaction", "type": "rating" },
+        { "key": "completion", "label": "Completion", "type": "percent" },
+        { "key": "monthly_gift", "label": "Monthly gift", "type": "currency" },
+        {
+          "key": "c_tier",
+          "label": "Tier",
+          "type": "select",
+          "metadata": { "options": ["Bronze", "Silver", "Gold"] }
+        },
+        {
+          "key": "c_channels",
+          "label": "Channels",
+          "type": "select",
+          "metadata": { "allow_multiple": true, "options": ["Email", "Post", "SMS"] }
+        },
+        { "key": "c_branch", "label": "Branch", "type": "reference" },
+        { "key": "attachments", "label": "Attachments", "type": "file" },
+        { "key": "address", "label": "Address", "type": "location" },
+        { "key": "owner", "label": "Owner", "type": "user" },
+        { "key": "reference_code", "label": "Reference", "type": "string", "is_read_only": true },
+        { "key": "lifetime_value", "label": "Lifetime value", "type": "currency", "is_rollup_field": true },
+        { "key": "engagement_score", "label": "Engagement", "type": "number", "is_smart_field": true },
+        { "key": "nickname", "label": "Nickname", "type": "unknown_future_type" },
+        { "label": "Broken, no key", "type": "string" }
+      ]
+    },
+    {
+      "key": "branch",
+      "label": "Branch",
+      "fields": [
+        { "key": "name", "label": "Name", "type": "string" },
+        { "key": "emails", "label": "Email", "type": "email" }
+      ]
+    }
+  ]
+}
