@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CoyshDigital\Beacon\Resource;
 
+use CoyshDigital\Beacon\Exception\BeaconException;
 use CoyshDigital\Beacon\Exception\InvalidPayloadException;
 use CoyshDigital\Beacon\Http\Request;
 use CoyshDigital\Beacon\Http\Response;
@@ -29,9 +30,21 @@ final class Entities
     private ?EntityType $schema = null;
 
     public function __construct(
-        private readonly Transport $transport,
+        private readonly ?Transport $transport,
         public readonly string $typeKey,
     ) {
+    }
+
+    /**
+     * A record type that can describe requests but not send them.
+     *
+     * For hosts that do their own HTTP — call the `…Request()` methods and hand
+     * the result to whatever does the sending. Calling a sending method on one
+     * of these throws.
+     */
+    public static function describe(string $typeKey, ?EntityType $schema = null): self
+    {
+        return (new self(null, $typeKey))->withSchema($schema);
     }
 
     /**
@@ -62,7 +75,7 @@ final class Entities
      */
     public function create(array|EntityPayload $entity): Response
     {
-        return $this->transport->send($this->createRequest($entity));
+        return $this->transport()->send($this->createRequest($entity));
     }
 
     /**
@@ -78,7 +91,7 @@ final class Entities
 
     public function read(int|string $id, ?bool $populate = null, ?bool $archived = null): Response
     {
-        return $this->transport->send($this->readRequest($id, $populate, $archived));
+        return $this->transport()->send($this->readRequest($id, $populate, $archived));
     }
 
     /**
@@ -103,7 +116,7 @@ final class Entities
      */
     public function update(int|string $id, array|EntityPayload $entity): Response
     {
-        return $this->transport->send($this->updateRequest($id, $entity));
+        return $this->transport()->send($this->updateRequest($id, $entity));
     }
 
     /**
@@ -127,7 +140,7 @@ final class Entities
      */
     public function delete(int|string $id): Response
     {
-        return $this->transport->send($this->deleteRequest($id));
+        return $this->transport()->send($this->deleteRequest($id));
     }
 
     /**
@@ -152,7 +165,7 @@ final class Entities
      */
     public function upsert(string $primaryFieldKey, array|EntityPayload $entity): Response
     {
-        return $this->transport->send($this->upsertRequest($primaryFieldKey, $entity));
+        return $this->transport()->send($this->upsertRequest($primaryFieldKey, $entity));
     }
 
     /**
@@ -191,7 +204,7 @@ final class Entities
      */
     public function list(array $query = [], ?bool $populate = null, ?bool $archived = null): Response
     {
-        return $this->transport->send($this->listRequest($query, $populate, $archived));
+        return $this->transport()->send($this->listRequest($query, $populate, $archived));
     }
 
     /**
@@ -214,7 +227,7 @@ final class Entities
      */
     public function search(array $filter, array $query = [], ?bool $populate = null): Response
     {
-        return $this->transport->send($this->searchRequest($filter, $query, $populate));
+        return $this->transport()->send($this->searchRequest($filter, $query, $populate));
     }
 
     /**
@@ -235,6 +248,18 @@ final class Entities
 
     // Internals
     // =========================================================================
+
+    private function transport(): Transport
+    {
+        if ($this->transport === null) {
+            throw new BeaconException(sprintf(
+                'This "%s" resource can only describe requests, not send them. Use the …Request() methods, or build one from a BeaconClient.',
+                $this->typeKey,
+            ));
+        }
+
+        return $this->transport;
+    }
 
     private function endpoint(int|string|null $id = null): string
     {

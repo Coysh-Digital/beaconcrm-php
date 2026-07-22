@@ -1,6 +1,6 @@
 # Release Notes for Beacon CRM PHP
 
-## Unreleased
+## 1.0.0 - 2026-07-22
 
 ### Added
 

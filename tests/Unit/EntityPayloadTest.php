@@ -6,6 +6,7 @@ namespace CoyshDigital\Beacon\Tests\Unit;
 
 use CoyshDigital\Beacon\Payload\EntityPayload;
 use CoyshDigital\Beacon\Payload\ValueShaper;
+use CoyshDigital\Beacon\Schema\FieldType;
 use CoyshDigital\Beacon\Tests\Fixtures\Fixture;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -171,6 +172,25 @@ final class EntityPayloadTest extends TestCase
         $built = EntityPayload::for()->set('emails', 'alex@example.org')->build();
 
         self::assertSame('alex@example.org', $built['emails']);
+    }
+
+    public function testAResolverCanShapeFromAHostsOwnFlattenedSchema(): void
+    {
+        $storedTypes = ['emails' => 'email', 'monthly_gift' => 'currency', 'name' => 'person_name'];
+
+        $built = EntityPayload::resolvedBy(
+            static fn(string $key): ?FieldType => FieldType::tryFromName($storedTypes[$key] ?? null),
+        )
+            ->set('emails', 'alex@example.org')
+            ->set('monthly_gift', '25.50')
+            ->set('name:first', 'Alex')
+            ->set('unknown', 'as-is')
+            ->build();
+
+        self::assertSame([['email' => 'alex@example.org', 'is_primary' => true]], $built['emails']);
+        self::assertSame(['value' => 25.5], $built['monthly_gift']);
+        self::assertSame('Alex', $built['name']['full']);
+        self::assertSame('as-is', $built['unknown']);
     }
 
     public function testHasFieldSeesValuesSetThroughAPart(): void

@@ -6,6 +6,7 @@ namespace CoyshDigital\Beacon\Payload;
 
 use CoyshDigital\Beacon\Schema\EntityType;
 use CoyshDigital\Beacon\Schema\Field;
+use CoyshDigital\Beacon\Schema\FieldType;
 
 /**
  * Builds an entity body from plain values, shaping each one against the
@@ -28,13 +29,44 @@ final class EntityPayload
     /** @var array<string, mixed> */
     private array $values = [];
 
-    private function __construct(private readonly ?EntityType $entityType)
+    /**
+     * @param (callable(string): ?FieldType)|null $typeResolver
+     */
+    private function __construct(private $typeResolver)
     {
     }
 
+    /**
+     * Shapes values against a record type's schema. With no schema, values are
+     * sent exactly as given.
+     */
     public static function for(?EntityType $entityType = null): self
     {
-        return new self($entityType);
+        if ($entityType === null) {
+            return new self(null);
+        }
+
+        return new self(static fn(string $key): ?FieldType => $entityType->field($key)?->type);
+    }
+
+    /**
+     * Shapes values using a callback that maps a field key to its Beacon type.
+     *
+     * For hosts that keep their own flattened copy of the schema — a form
+     * builder storing one mapping row per field, say — and would otherwise have
+     * to re-fetch the whole thing to shape a payload correctly.
+     *
+     * ```php
+     * EntityPayload::resolvedBy(
+     *     fn(string $key): ?FieldType => FieldType::tryFromName($storedTypes[$key] ?? null),
+     * );
+     * ```
+     *
+     * @param callable(string): ?FieldType $typeResolver
+     */
+    public static function resolvedBy(callable $typeResolver): self
+    {
+        return new self($typeResolver);
     }
 
     /**
@@ -113,7 +145,7 @@ final class EntityPayload
                 continue;
             }
 
-            $payload[$handle] = ValueShaper::shape($this->entityType?->field($handle), $value);
+            $payload[$handle] = ValueShaper::shapeForType($this->resolveType($handle), $value);
         }
 
         foreach ($nameParts as $key => $parts) {
@@ -121,5 +153,10 @@ final class EntityPayload
         }
 
         return $payload;
+    }
+
+    private function resolveType(string $key): ?FieldType
+    {
+        return $this->typeResolver === null ? null : ($this->typeResolver)($key);
     }
 }
