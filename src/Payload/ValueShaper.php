@@ -49,6 +49,12 @@ final class ValueShaper
             // the field permits only one linked record.
             FieldType::Reference => self::shapeReference($value),
             FieldType::PersonName => self::assembleName(is_array($value) ? $value : ['full' => $value]),
+            // Addresses are contact points, like emails and phones: a list of
+            // objects even when the field holds only one. Send a bare object
+            // and Beacon answers 500 with a leaked backend error, `Cannot
+            // assign to read only property '0' of object '[object String]'`,
+            // which reads like an outage rather than a payload problem.
+            FieldType::Location => self::shapeLocations($value),
             default => $value,
         };
     }
@@ -114,6 +120,45 @@ final class ValueShaper
         }
 
         return $phones;
+    }
+
+    /**
+     * Addresses as `[{"address_line_one": "…", "is_primary": true}]`, with the
+     * first entry primary.
+     *
+     * A bare object is wrapped in a list, because that mistake is otherwise
+     * punished with an HTTP 500 rather than a validation error. A plain string
+     * becomes the first address line, mirroring how a bare person name becomes
+     * `full`.
+     *
+     * Beacon fills in `country` from `country_code` and vice versa, geocodes
+     * `latitude` and `longitude` itself, and rejects any key it does not
+     * recognise — note `postal_code`, not `postcode`. Its own read-only keys
+     * are accepted back unchanged, so a value read from Beacon can be modified
+     * and written straight back.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function shapeLocations(mixed $value): array
+    {
+        $addresses = [];
+
+        foreach (self::toAddressList($value) as $address) {
+            if (!is_array($address)) {
+                $address = ['address_line_one' => (string)$address];
+            }
+
+            // An address of nothing but blanks would be a new empty contact
+            // point on the record rather than a no-op.
+            if (array_filter($address, static fn(mixed $part): bool => !self::isEmpty($part)) === []) {
+                continue;
+            }
+
+            // `+` leaves an is_primary the caller set alone.
+            $addresses[] = $address + ['is_primary' => $addresses === []];
+        }
+
+        return $addresses;
     }
 
     /**
@@ -201,5 +246,23 @@ final class ValueShaper
         }
 
         return [$value];
+    }
+
+    /**
+     * One address, or several?
+     *
+     * An address is itself an array, so the usual toList() cannot tell a single
+     * address from a list of them. A JSON object — a PHP array with string keys
+     * — is one address; a list is many.
+     *
+     * @return list<mixed>
+     */
+    private static function toAddressList(mixed $value): array
+    {
+        if (is_array($value) && $value !== [] && !array_is_list($value)) {
+            return [$value];
+        }
+
+        return self::toList($value);
     }
 }

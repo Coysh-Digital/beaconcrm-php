@@ -35,23 +35,36 @@ enum FieldType: string
      * Types that cannot be written from a single mapped value.
      *
      * `file` needs Beacon's signed-upload handshake and cannot be sent inside
-     * an entity payload; `user` refers to Beacon user accounts rather than data;
-     * `location` expects a structured address object that one value cannot
-     * express.
+     * an entity payload; `user` refers to Beacon user accounts rather than data.
+     *
+     * `location` used to be here. It is a structured object, but so is a person
+     * name, and both are writable from one value once the shaper knows what to
+     * build — see ValueShaper::shapeLocation().
      */
     public function isWritableFromScalar(): bool
     {
-        return !in_array($this, [self::File, self::User, self::Location], true);
+        return !in_array($this, [self::File, self::User], true);
     }
 
     /**
      * Whether Beacon represents this field as a JSON array, regardless of how
-     * many values the field is configured to hold. Drop-downs and record links
-     * are arrays even when single-select — a bare string is rejected.
+     * many values the field is configured to hold. Drop-downs, record links and
+     * contact points are arrays even when single-valued — a bare object or
+     * string is rejected.
      */
     public function isAlwaysArray(): bool
     {
-        return in_array($this, [self::Select, self::Reference, self::Email, self::Phone], true);
+        return in_array($this, [self::Select, self::Reference, self::Email, self::Phone, self::Location], true);
+    }
+
+    /**
+     * Whether Beacon models this type as a contact point: a list of objects,
+     * each flagged with `is_primary`. Emails, phones and addresses all are, and
+     * all three behave identically on write.
+     */
+    public function isContactPoint(): bool
+    {
+        return in_array($this, [self::Email, self::Phone, self::Location], true);
     }
 
     /**

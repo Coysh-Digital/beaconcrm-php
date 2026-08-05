@@ -207,4 +207,114 @@ final class EntityPayloadTest extends TestCase
         self::assertTrue($this->payload()->isEmpty());
         self::assertFalse($this->payload()->setMany(['job_title' => 'Trustee'])->isEmpty());
     }
+
+    public function testABareAddressObjectIsWrappedInAList(): void
+    {
+        // The whole point: Beacon answers a bare object with an HTTP 500
+        // carrying a leaked backend error, so the mistake is made impossible.
+        $built = $this->payload()
+            ->set('address', ['city' => 'Warwick', 'postal_code' => 'CV34 4AB'])
+            ->build();
+
+        self::assertSame([[
+            'city' => 'Warwick',
+            'postal_code' => 'CV34 4AB',
+            'is_primary' => true,
+        ]], $built['address']);
+    }
+
+    public function testAListOfAddressesIsKept(): void
+    {
+        $built = $this->payload()
+            ->set('address', [['city' => 'Warwick'], ['city' => 'Bath']])
+            ->build();
+
+        self::assertSame([
+            ['city' => 'Warwick', 'is_primary' => true],
+            ['city' => 'Bath', 'is_primary' => false],
+        ], $built['address']);
+    }
+
+    public function testAnExplicitIsPrimaryIsRespected(): void
+    {
+        $built = $this->payload()
+            ->set('address', [['city' => 'Warwick', 'is_primary' => false]])
+            ->build();
+
+        self::assertSame([['city' => 'Warwick', 'is_primary' => false]], $built['address']);
+    }
+
+    public function testAPlainStringBecomesTheFirstAddressLine(): void
+    {
+        $built = $this->payload()->set('address', '12 Example Street')->build();
+
+        self::assertSame(
+            [['address_line_one' => '12 Example Street', 'is_primary' => true]],
+            $built['address'],
+        );
+    }
+
+    public function testAddressPartsAreAssembledFromFlatHandles(): void
+    {
+        $built = $this->payload()
+            ->set('address:address_line_one', '12 Example Street')
+            ->set('address:city', 'Warwick')
+            ->set('address:postal_code', 'CV34 4AB')
+            ->build();
+
+        self::assertSame([[
+            'address_line_one' => '12 Example Street',
+            'city' => 'Warwick',
+            'postal_code' => 'CV34 4AB',
+            'is_primary' => true,
+        ]], $built['address']);
+    }
+
+    public function testAnAddressOfNothingButBlanksIsDropped(): void
+    {
+        // Otherwise Beacon gains an empty contact point rather than nothing.
+        $built = $this->payload()
+            ->set('address', [['city' => null, 'postal_code' => '']])
+            ->build();
+
+        self::assertSame([], $built['address']);
+    }
+
+    public function testAddressPartsResolveThroughAHandleKeyedResolver(): void
+    {
+        // A host with its own flattened schema knows `address:city` but has
+        // never heard of `address`, so the type has to be found from a part.
+        $types = ['address:city' => 'location', 'address:postal_code' => 'location'];
+
+        $built = EntityPayload::resolvedBy(
+            static fn(string $key): ?FieldType => FieldType::tryFromName($types[$key] ?? null),
+        )
+            ->set('address:city', 'Warwick')
+            ->set('address:postal_code', 'CV34 4AB')
+            ->build();
+
+        self::assertSame([[
+            'city' => 'Warwick',
+            'postal_code' => 'CV34 4AB',
+            'is_primary' => true,
+        ]], $built['address']);
+    }
+
+    public function testAnAddressReadFromBeaconCanBeWrittenBack(): void
+    {
+        // Beacon accepts its own read-only keys back unchanged, so a
+        // read-modify-write round trip must not be mangled on the way out.
+        $fromBeacon = [[
+            'city' => 'Warwick',
+            'latitude' => 52.281709,
+            'longitude' => -1.587663,
+            'is_primary' => true,
+            'postal_code' => 'CV34 4AB',
+            'country_code' => 'GB',
+            'address_line_one' => '12 Example Street',
+            'contact_point_id' => '285ae85b-168d-4afe-8f43-9b76e9faea9f',
+        ]];
+
+        self::assertSame($fromBeacon, $this->payload()->set('address', $fromBeacon)->build()['address']);
+    }
 }

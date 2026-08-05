@@ -49,13 +49,34 @@ final class EntityTypeTest extends TestCase
         self::assertTrue($type->field('job_title')?->isWritable());
     }
 
-    public function testFileUserAndLocationFieldsAreNotMappable(): void
+    public function testFileAndUserFieldsAreNotMappable(): void
     {
         $type = Fixture::supporterType();
 
         self::assertFalse($type->field('attachments')?->isMappable());
-        self::assertFalse($type->field('address')?->isMappable());
         self::assertFalse($type->field('owner')?->isMappable());
+    }
+
+    public function testLocationFieldsAreMappable(): void
+    {
+        // Beacon takes an address as a list of objects, which the shaper builds
+        // from one value, so a location is no less mappable than a person name.
+        self::assertTrue(Fixture::supporterType()->field('address')?->isMappable());
+    }
+
+    public function testLocationFieldsOfferOneHandlePerPart(): void
+    {
+        $field = Fixture::supporterType()->field('address');
+
+        self::assertNotNull($field);
+        self::assertTrue($field->isLocation());
+        self::assertContains('address:city', $field->partHandles());
+        self::assertContains('address:postal_code', $field->partHandles());
+        self::assertContains('address:address_line_one', $field->partHandles());
+
+        // Beacon sets these itself; offering them for mapping would be a trap.
+        self::assertNotContains('address:latitude', $field->partHandles());
+        self::assertNotContains('address:contact_point_id', $field->partHandles());
     }
 
     public function testMappableFieldsExcludeUnwritableAndUnmappableOnes(): void
@@ -64,8 +85,8 @@ final class EntityTypeTest extends TestCase
 
         self::assertContains('emails', $mappable);
         self::assertContains('c_tier', $mappable);
+        self::assertContains('address', $mappable);
         self::assertNotContains('attachments', $mappable);
-        self::assertNotContains('address', $mappable);
         self::assertNotContains('owner', $mappable);
         self::assertNotContains('reference_code', $mappable);
         self::assertNotContains('lifetime_value', $mappable);

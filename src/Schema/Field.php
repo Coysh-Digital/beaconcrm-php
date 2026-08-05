@@ -20,6 +20,28 @@ final class Field
     public const NAME_PARTS = ['full', 'first', 'last', 'middle', 'prefix'];
 
     /**
+     * The writable parts of an address, in the order Beacon presents them.
+     *
+     * Beacon rejects any key outside this list — `postcode` instead of
+     * `postal_code` is the easy mistake. It sets `latitude`, `longitude` and
+     * `contact_point_id` itself, so they are absent here; they are accepted
+     * back unchanged if a value read from Beacon is written straight back.
+     *
+     * @var list<string>
+     */
+    public const LOCATION_PARTS = [
+        'address_line_one',
+        'address_line_two',
+        'address_line_three',
+        'city',
+        'region',
+        'postal_code',
+        'country',
+        'country_code',
+        'notes',
+    ];
+
+    /**
      * Separator between a field key and a sub-part, used to address one piece
      * of a structured field with a single flat handle — `name:first`.
      */
@@ -87,8 +109,8 @@ final class Field
     /**
      * Whether this field can be written from a single plain value.
      *
-     * False for file, user and location fields, which need more than a payload
-     * value can carry. See FieldType::isWritableFromScalar().
+     * False for file and user fields, which need more than a payload value can
+     * carry. See FieldType::isWritableFromScalar().
      */
     public function isMappable(): bool
     {
@@ -150,20 +172,42 @@ final class Field
     }
 
     /**
-     * The flat handles addressing each part of a person-name field, so a
-     * mapping UI can offer one row per part.
+     * Whether this field is an address, addressed either whole or one part at a
+     * time — `address:city`, `address:postal_code` and so on.
+     */
+    public function isLocation(): bool
+    {
+        return $this->type === FieldType::Location;
+    }
+
+    /**
+     * The parts this field is made of, if it is structured.
+     *
+     * @return list<string>
+     */
+    public function parts(): array
+    {
+        return match ($this->type) {
+            FieldType::PersonName => self::NAME_PARTS,
+            FieldType::Location => self::LOCATION_PARTS,
+            default => [],
+        };
+    }
+
+    /**
+     * The flat handles addressing each part of a structured field, so a mapping
+     * UI can offer one row per part.
+     *
+     * Only the first address can be mapped this way. A record with several needs
+     * the whole value set at once — see ValueShaper::shapeLocations().
      *
      * @return list<string>
      */
     public function partHandles(): array
     {
-        if (!$this->isPersonName()) {
-            return [];
-        }
-
         return array_map(
             fn(string $part): string => $this->key . self::PART_SEPARATOR . $part,
-            self::NAME_PARTS,
+            $this->parts(),
         );
     }
 }

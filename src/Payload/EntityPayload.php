@@ -12,15 +12,16 @@ use CoyshDigital\Beacon\Schema\FieldType;
  * Builds an entity body from plain values, shaping each one against the
  * account's schema.
  *
- * Values are addressed by field key. Structured person names are addressed one
- * part at a time — `name:first`, `name:last` — and reassembled into a single
- * object on build, which lets a flat mapping UI drive a nested payload.
+ * Values are addressed by field key. Structured fields — person names and
+ * addresses — are addressed one part at a time, `name:first`, `address:city`,
+ * and reassembled on build, which lets a flat mapping UI drive a nested payload.
  *
  * ```php
  * $body = EntityPayload::for($personType)
  *     ->set('name:first', 'Alex')
  *     ->set('name:last', 'Rivera')
  *     ->set('emails', 'alex@example.org')
+ *     ->set('address:city', 'Warwick')
  *     ->build();
  * ```
  */
@@ -135,12 +136,12 @@ final class EntityPayload
     public function build(): array
     {
         $payload = [];
-        $nameParts = [];
+        $structured = [];
 
         foreach ($this->values as $handle => $value) {
             if (str_contains($handle, Field::PART_SEPARATOR)) {
                 [$key, $part] = explode(Field::PART_SEPARATOR, $handle, 2);
-                $nameParts[$key][$part] = $value;
+                $structured[$key][$part] = $value;
 
                 continue;
             }
@@ -148,8 +149,12 @@ final class EntityPayload
             $payload[$handle] = ValueShaper::shapeForType($this->resolveType($handle), $value);
         }
 
-        foreach ($nameParts as $key => $parts) {
-            $payload[$key] = ValueShaper::assembleName($parts);
+        // Parts collected from flat handles are assembled last, so a field set
+        // both ways ends up with the parts rather than a half-built object.
+        foreach ($structured as $key => $parts) {
+            $payload[$key] = $this->resolveStructuredType($key, $parts) === FieldType::Location
+                ? ValueShaper::shapeLocations($parts)
+                : ValueShaper::assembleName($parts);
         }
 
         return $payload;
@@ -158,5 +163,33 @@ final class EntityPayload
     private function resolveType(string $key): ?FieldType
     {
         return $this->typeResolver === null ? null : ($this->typeResolver)($key);
+    }
+
+    /**
+     * The type of a field that was set one part at a time.
+     *
+     * A host keeping its own flattened schema — a form builder with one mapping
+     * row per handle — knows `address:city` but has never heard of `address`,
+     * so fall back to asking about a part handle.
+     *
+     * @param array<string, mixed> $parts
+     */
+    private function resolveStructuredType(string $key, array $parts): ?FieldType
+    {
+        $type = $this->resolveType($key);
+
+        if ($type !== null) {
+            return $type;
+        }
+
+        foreach (array_keys($parts) as $part) {
+            $type = $this->resolveType($key . Field::PART_SEPARATOR . $part);
+
+            if ($type !== null) {
+                return $type;
+            }
+        }
+
+        return null;
     }
 }

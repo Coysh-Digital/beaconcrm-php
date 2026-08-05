@@ -258,6 +258,7 @@ converts your values:
 | Person name | An object of name parts, with `full` derived if you set only the parts |
 | Email | `[{"email": "...", "is_primary": true}]` |
 | Phone | `[{"number": "...", "is_primary": true}]` |
+| Location | `[{"address_line_one": "...", "is_primary": true}]`, **a list even for single-address fields** |
 | Drop-down | An array of values, **even for single-select fields** |
 | Record link | An array of integer Beacon record IDs, even for single links |
 | Checkbox | A JSON boolean |
@@ -269,6 +270,52 @@ Person names are addressed one part at a time (`name:full`, `name:first`,
 `name:last`, `name:middle`, `name:prefix`) and reassembled into a single object
 when the payload is built. Set only `first` and `last` and `full` is derived,
 which matters because `full` is what Beacon shows throughout its UI.
+
+### Addresses
+
+An address is a contact point, exactly like an email or a phone number, so
+Beacon takes a **list of address objects** even where the field holds only one:
+
+```php
+$organisations->create(
+    $organisations->payload()->set('address', [[
+        'address_line_one' => '12 Example Street',
+        'city'             => 'Warwick',
+        'postal_code'      => 'CV34 4AB',
+        'country_code'     => 'GB',
+    ]])
+);
+```
+
+Set a bare object and this library wraps it for you, because getting that wrong
+is unusually expensive: Beacon answers with an HTTP 500 carrying a leaked
+backend error, `Cannot assign to read only property '0' of object
+'[object String]'`, which reads like an outage rather than a payload problem.
+
+Addresses can also be addressed one part at a time, which is what lets a flat
+mapping UI fill one in:
+
+```php
+$people->payload()
+    ->set('address:address_line_one', '12 Example Street')
+    ->set('address:city', 'Warwick')
+    ->set('address:postal_code', 'CV34 4AB');
+```
+
+The writable parts are `address_line_one`, `address_line_two`,
+`address_line_three`, `city`, `region`, `postal_code`, `country`, `country_code`
+and `notes`. Beacon rejects any other key outright — note `postal_code` rather
+than `postcode` — and sets `latitude`, `longitude` and `contact_point_id`
+itself, though it accepts them back unchanged, so a value read from Beacon can
+be modified and written straight back.
+
+Fill in either `country` or `country_code` and Beacon derives the other.
+Geocoding happens server-side. A plain string is treated as the first address
+line, mirroring how a bare person name becomes `full`.
+
+A field's `allowsMultiple()` says whether more than one address is permitted;
+the payload is a list either way. Writes replace the whole list rather than
+appending to it.
 
 > **Currency fields do not take a plain number.**
 > Beacon wants an object, and amounts are in major units, so `25.5` means £25.50
@@ -297,7 +344,6 @@ real values and are sent.
 - **File uploads.** Beacon requires a separate signed-upload handshake that
   cannot happen inside a record payload. File fields can be read, and you get a
   signed download URL valid for 60 minutes.
-- **Locations and addresses.** Beacon expects a structured address object.
 - **Beacon users.** These refer to user accounts rather than data.
 - **Anything Beacon calculates.** Smart fields, rollups and auto-increments are
   computed by Beacon and rejected on write. That covers a lot of useful-looking
