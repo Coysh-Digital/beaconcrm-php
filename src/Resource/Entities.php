@@ -10,13 +10,17 @@ use CoyshDigital\Beacon\Http\Request;
 use CoyshDigital\Beacon\Http\Response;
 use CoyshDigital\Beacon\Http\Transport;
 use CoyshDigital\Beacon\Payload\EntityPayload;
+use CoyshDigital\Beacon\Payload\ValueShaper;
 use CoyshDigital\Beacon\Schema\EntityType;
+use CoyshDigital\Beacon\Schema\FieldType;
 
 /**
  * Records of one Beacon record type.
  *
- * Every method that sends has a `…Request()` twin returning the unsent
- * {@see Request}, for hosts that need to do their own sending.
+ * Every single-request method has a `…Request()` twin returning the unsent
+ * {@see Request}, for hosts that need to do their own sending. The linking and
+ * lookup helpers — {@see link()}, {@see unlink()}, {@see findBy()} — have no
+ * twin, because each is several requests rather than one.
  *
  * Create, read, update, upsert and list have all been exercised against a live
  * Beacon account. Beacon has no search or filter endpoint that could be found:
@@ -247,8 +251,229 @@ final class Entities
         } while ($entities !== [] && $seen < $response->total());
     }
 
+    // Linking
+    // =========================================================================
+
+    /**
+     * The record IDs a link field currently holds.
+     *
+     * @return list<int>
+     */
+    public function links(int|string $id, string $fieldKey): array
+    {
+        return ValueShaper::referenceIds($this->read($id, populate: false)->entity()[$fieldKey] ?? null);
+    }
+
+    /**
+     * Adds records to a link field, keeping the links already there.
+     *
+     * This is why the method exists. A write to a link field **replaces** the
+     * whole list rather than appending to it, so the obvious
+     * `update($id, ['admins' => [$personId]])` quietly drops every other admin.
+     * Adding one safely means reading the list, merging, and sending it back
+     * whole — which is what happens here.
+     *
+     * Returns null when every ID was already linked, so nothing was sent.
+     *
+     * @param int|list<int|string> $linkIds
+     */
+    public function link(int|string $id, string $fieldKey, int|array $linkIds): ?Response
+    {
+        $existing = $this->links($id, $fieldKey);
+        $merged = $existing;
+
+        foreach (ValueShaper::shapeReference($linkIds) as $linkId) {
+            if (!in_array($linkId, $merged, true)) {
+                $merged[] = $linkId;
+            }
+        }
+
+        return $merged === $existing ? null : $this->replaceLinks($id, $fieldKey, $merged);
+    }
+
+    /**
+     * Removes records from a link field, leaving the rest in place.
+     *
+     * Returns null when none of the IDs was linked, so nothing was sent.
+     *
+     * @param int|list<int|string> $linkIds
+     */
+    public function unlink(int|string $id, string $fieldKey, int|array $linkIds): ?Response
+    {
+        $existing = $this->links($id, $fieldKey);
+        $remove = ValueShaper::shapeReference($linkIds);
+
+        $remaining = array_values(array_filter(
+            $existing,
+            static fn(int $linkId): bool => !in_array($linkId, $remove, true),
+        ));
+
+        return $remaining === $existing ? null : $this->replaceLinks($id, $fieldKey, $remaining);
+    }
+
+    /**
+     * Sets a link field to exactly these records, dropping any others.
+     *
+     * @param int|list<int|string> $linkIds
+     */
+    public function setLinks(int|string $id, string $fieldKey, int|array $linkIds): Response
+    {
+        return $this->replaceLinks($id, $fieldKey, ValueShaper::shapeReference($linkIds));
+    }
+
+    // Lookup
+    // =========================================================================
+
+    /**
+     * The first record whose `$fieldKey` matches `$value`, or null.
+     *
+     * Beacon has no search endpoint, so this pages the whole record type and
+     * compares client-side: one request per 200 records, against a rate limit
+     * of 300 a minute. On a type holding 5,000 records a miss costs 25
+     * requests. Prefer {@see resolveId()}, which asks Beacon to do the matching
+     * in a single request.
+     *
+     * Comparison is case-insensitive for strings, since the point is usually to
+     * match a value someone typed rather than one held internally. Contact-point fields are compared against
+     * the value inside the object — a stored email is
+     * `[{"email": "…"}]`, never a bare string.
+     *
+     * @param int|null $limit Stop after this many records. Null walks them all.
+     * @return array<string, mixed>|null
+     */
+    public function findBy(string $fieldKey, mixed $value, ?int $limit = null): ?array
+    {
+        if (ValueShaper::isEmpty($value)) {
+            return null;
+        }
+
+        $type = $this->schema?->field($fieldKey)?->type;
+        $scanned = 0;
+
+        foreach ($this->each(perPage: 200, populate: false) as $entity) {
+            if (self::valueMatches($entity[$fieldKey] ?? null, $value, $type)) {
+                return $entity;
+            }
+
+            if ($limit !== null && ++$scanned >= $limit) {
+                break;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The ID of the record matching `$matchFieldKey`, creating it if there is
+     * none.
+     *
+     * One request, and the cheap answer to "I have a church name and need a
+     * record ID". It is an upsert, so the same rules apply: the match field has
+     * to be genuinely unique, and has to carry a value in the payload.
+     *
+     * Note the cost of getting the match field wrong — every call creates
+     * another record rather than matching. Use {@see findBy()} instead when
+     * creating must not happen.
+     *
+     * @param array<string, mixed>|EntityPayload $entity
+     */
+    public function resolveId(string $matchFieldKey, array|EntityPayload $entity): ?int
+    {
+        return $this->upsert($matchFieldKey, $entity)->entityId();
+    }
+
     // Internals
     // =========================================================================
+
+    /**
+     * Writes a link field's whole list.
+     *
+     * Sent as a raw body rather than through {@see EntityPayload}, which drops
+     * an empty array as an empty value — so building the payload that way would
+     * make it impossible to remove the last link.
+     *
+     * @param list<int> $linkIds
+     */
+    private function replaceLinks(int|string $id, string $fieldKey, array $linkIds): Response
+    {
+        return $this->transport()->send(new Request(
+            'PATCH',
+            $this->endpoint($id),
+            body: [$fieldKey => $linkIds],
+        ));
+    }
+
+    /**
+     * Whether a stored value matches what was searched for.
+     */
+    private static function valueMatches(mixed $stored, mixed $value, ?FieldType $type): bool
+    {
+        foreach (self::comparableValues($stored, $type) as $candidate) {
+            if (is_string($candidate) && is_string($value)) {
+                if (strcasecmp($candidate, $value) === 0) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            // Loose on purpose: an ID read back as an int should match the
+            // same ID given as a string.
+            if ($candidate == $value) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The scalars worth comparing inside a stored value.
+     *
+     * Emails, phones and addresses are contact points — lists of objects — so
+     * the comparable value is inside the object, under a key that differs per
+     * type.
+     *
+     * @return list<mixed>
+     */
+    private static function comparableValues(mixed $stored, ?FieldType $type): array
+    {
+        if ($stored === null) {
+            return [];
+        }
+
+        if (!is_array($stored)) {
+            return [$stored];
+        }
+
+        $keys = match ($type) {
+            FieldType::Email => ['email'],
+            FieldType::Phone => ['number'],
+            // Unknown type: try both, so a lookup still works when no schema is
+            // attached.
+            default => ['email', 'number', 'id'],
+        };
+
+        $values = [];
+
+        foreach ($stored as $item) {
+            if (!is_array($item)) {
+                $values[] = $item;
+
+                continue;
+            }
+
+            foreach ($keys as $key) {
+                if (isset($item[$key])) {
+                    $values[] = $item[$key];
+
+                    break;
+                }
+            }
+        }
+
+        return $values;
+    }
 
     private function transport(): Transport
     {

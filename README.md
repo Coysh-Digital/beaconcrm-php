@@ -34,6 +34,8 @@ $id = $people->create(
   typed exception.
 - Rate limits and transient server errors are retried with exponential backoff
   and jitter, honouring `Retry-After`. Validation failures never are.
+- Records can be linked to each other without dropping the links already there,
+  which a plain write does. See [Linking records](#linking-records).
 - Any call can be described without being sent, so a framework can do its own
   HTTP and keep its own events, logging and test modes.
 
@@ -105,7 +107,8 @@ foreach ($beacon->entityTypes()->all() as $type) {
 | `mappableFields()` | Fields writable from a single plain value, which is the set worth showing in a mapping UI |
 
 `Field` gives you `label`, `type` (a `FieldType`), `rawType`, `options()`,
-`allowsMultiple()`, `includesTime()`, `isWritable()` and `isMappable()`.
+`allowsMultiple()`, `includesTime()`, `isWritable()` and `isMappable()`. For a
+record link, `linksTo()` names the record types it may point at.
 
 ## Creating records
 
@@ -229,6 +232,93 @@ endpoint. `entity/{type}/search`, `/list` and `/filter` all return a 404. Filter
 a list client-side, or use [`request()`](#anything-else) if your account exposes
 something this library does not model.
 
+## Linking records
+
+A "point to another record" field — Beacon's `reference` type — holds a list of
+record IDs. The one thing to know before writing one:
+
+> **A write to a link field replaces the whole list.** It does not append. Send
+> `['c_church_admins' => [$personId]]` and every other admin is silently
+> dropped.
+
+So adding a link means reading the list, merging, and sending it back whole.
+`link()` does that:
+
+```php
+$organisations = $beacon->entitiesWithSchema('organization');
+
+$organisations->link($orgId, 'c_church_admins', $personId);    // keeps the others
+$organisations->unlink($orgId, 'c_church_admins', $personId);  // removes just this one
+$organisations->links($orgId, 'c_church_admins');              // [4812, 5104]
+$organisations->setLinks($orgId, 'c_church_admins', [4812]);   // replaces, deliberately
+```
+
+`link()` and `unlink()` return `null` when the links were already as asked, so
+nothing was sent. `setLinks()` always writes, and is the only one of the three
+that needs no read first.
+
+Beacon checks the target type and the cardinality, and reports both as an HTTP
+500 with the detail in `error.raw`:
+
+```
+One of the referenced entities is not one of the allowed types: 41207
+must contain less than 1 items
+```
+
+Those numbers are record type IDs. `linksTo()` turns them into keys:
+
+```php
+$field = $beacon->entityTypes()->get('person')?->field('c_home_church');
+
+$field->linksTo();     // ['organization']
+$field->linksToIds();  // [41207]
+```
+
+Note also that a link takes **integers**. A numeric string is rejected with
+`0 must be of integer type`, and a bare integer outside a list with `must be of
+array type`. Values built through `payload()` are cast for you.
+
+### Finding the record to link to
+
+A link field takes an ID, but the value in hand is usually a name. There is no
+search endpoint, so there are two ways across:
+
+```php
+// One request. Matches on the field, and creates the record if nothing matches.
+$orgId = $organisations->resolveId('name', $organisations->payload()->set('name', $church));
+
+// Pages the whole record type and compares client-side. Never creates.
+$org = $organisations->findBy('name', $church);
+```
+
+`resolveId()` is an upsert, so it is a single request and is what you want when
+handling a value someone typed. The trade-off is that a typo creates a record
+rather than failing. `findBy()` never creates, but costs one request per 200 records — on a
+type holding 5,000 records a miss is 25 requests, against a rate limit of 300 a
+minute. It compares case-insensitively, and knows that a stored email is
+`[{"email": "…"}]` rather than a bare string.
+
+### Beacon's Relationships feature is not in the API
+
+Beacon has a second, separate way to connect records — **Relationships**, with
+types such as Employee and Trustee, reciprocal sides, and start and end dates.
+It is not exposed by the API at all, and this library cannot reach it. Beacon
+[says so directly](https://guide.beaconcrm.org/en/articles/5720215-beacon-s-api),
+and probing a live account confirms it: every candidate endpoint is absent.
+
+The schema mentions relationships only as opaque layout IDs
+(`entity_type_relationship_blocks`), which no endpoint resolves.
+
+To manage a connection programmatically, use a point-to-another-record field
+instead. The only other route is Beacon's CSV
+[relationship import](https://guide.beaconcrm.org/en/articles/6751891-import-relationships),
+which cannot be re-run to amend what it created.
+
+> **Probing Beacon for endpoints yourself?** An unknown top-level path does not
+> 404 — it accepts the connection and never answers. With retries on, twenty
+> such paths look exactly like an outage. Use `RetryPolicy::none()` and a short
+> timeout, and probe a known-good path alongside as a control.
+
 ## Exports
 
 Trigger a CSV export from a saved export template, poll until it finishes, then
@@ -260,7 +350,7 @@ converts your values:
 | Phone | `[{"number": "...", "is_primary": true}]` |
 | Location | `[{"address_line_one": "...", "is_primary": true}]`, **a list even for single-address fields** |
 | Drop-down | An array of values, **even for single-select fields** |
-| Record link | An array of integer Beacon record IDs, even for single links |
+| Record link | An array of integer Beacon record IDs, even for single links. **A write replaces the whole list** — see [Linking records](#linking-records) |
 | Checkbox | A JSON boolean |
 | Number, percent, rating | A JSON number |
 | Currency | An object, `{"value": 25.5}` |
@@ -459,6 +549,14 @@ Some paths that look obvious do not exist, in case you were about to try them:
 - `GET entity/{type}` returns a permissions error rather than a list. Listing is
   the plural `entities/{type}`.
 - `POST entity/{type}/search`, `/list` and `/filter` all return a 404.
+- Nothing exposes Beacon's Relationships feature. `relationships`,
+  `relationship_types`, `entity_relationships`, `entity_type_relationship_blocks`
+  and `entity/{type}/{id}/relationships` were all probed, and none is a route.
+  See [Beacon's Relationships feature is not in the API](#beacons-relationships-feature-is-not-in-the-api).
+
+Note that an unknown top-level path does not 404. Beacon accepts the connection
+and never answers, so the request times out — which is worth knowing before you
+probe anything yourself.
 
 Corrections from other accounts are welcome, especially for the export
 endpoints.

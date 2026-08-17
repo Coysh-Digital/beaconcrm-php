@@ -177,6 +177,11 @@ final class ValueShaper
     /**
      * Record links as an array of integer Beacon record IDs.
      *
+     * The casts are load-bearing. A numeric *string* is rejected —
+     * `Validation error: "c_home_church": 0 must be of integer type` —
+     * and a bare integer outside a list is rejected too, with ` must be of
+     * array type`. User input arrives as a string, so both are easy to hit.
+     *
      * @return list<int>
      */
     public static function shapeReference(mixed $value): array
@@ -185,6 +190,44 @@ final class ValueShaper
             static fn(mixed $item): int => (int)$item,
             array_filter(self::toList($value)),
         ));
+    }
+
+    /**
+     * The record IDs a link field holds, read back off a record.
+     *
+     * The counterpart to {@see shapeReference()}. Beacon returns a link as a
+     * list of bare integers whether or not `populate` was asked for — the
+     * populated records go into the response's `references`, not into the field
+     * itself — but a list of `{"id": …}` objects is normalised too, so a value
+     * from anywhere in a response can be handed over without the caller
+     * checking which shape it got.
+     *
+     * Reading is what makes adding a link safe: a write replaces the whole
+     * list, so appending means sending back what was already there.
+     *
+     * @return list<int>
+     */
+    public static function referenceIds(mixed $value): array
+    {
+        $ids = [];
+
+        foreach (self::toList($value) as $item) {
+            if (is_array($item)) {
+                $item = $item['id'] ?? null;
+            }
+
+            if (!is_numeric($item)) {
+                continue;
+            }
+
+            $id = (int)$item;
+
+            if (!in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
     }
 
     /**
