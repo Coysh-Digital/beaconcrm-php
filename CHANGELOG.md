@@ -1,5 +1,44 @@
 # Release Notes for Beacon CRM PHP
 
+## 1.2.0 - 2026-08-17
+
+Linking one record to another, verified against a live account.
+
+### Added
+
+- `Entities::link()` and `unlink()` add and remove record links without
+  disturbing the links already there. A write to a link field **replaces** the
+  whole list rather than appending to it, so adding one link with a plain
+  `update()` silently drops every other. Both return null when the links were
+  already as asked and nothing was sent.
+- `Entities::links()` reads a link field's current record IDs, and `setLinks()`
+  replaces them outright.
+- `Entities::resolveId()` turns a value into a record ID in one request, via
+  upsert, creating the record if nothing matches — the practical way to get from
+  a name you hold to the ID a link field needs.
+- `Entities::findBy()` finds a record by field value without creating anything.
+  Beacon has no search endpoint, so it pages and compares client-side; the
+  docblock and README are explicit about the cost. Comparison is
+  case-insensitive, and looks inside contact points, since a stored email is
+  `[{"email": …}]` rather than a bare string.
+- `ValueShaper::referenceIds()` normalises a link value read back off a record.
+- `Field::linksTo()` and `linksToIds()` report the record types a link may point
+  at. Beacon names them by numeric ID, so `EntityType` now exposes its `id` and
+  `listFromResponse()` resolves those IDs to keys in a second pass.
+- `Field::isReference()`.
+
+### Notes
+
+- **Beacon's Relationships feature has no API.** Types such as Employee and
+  Trustee, their reciprocal sides and their dates cannot be read or written.
+  `relationships`, `relationship_types`, `entity_relationships`,
+  `entity_type_relationship_blocks` and the per-record paths were all probed
+  against a live account, and none is a route. Use a point-to-another-record
+  field instead; the README explains the distinction.
+- An unknown top-level path does not answer with a 404. Beacon accepts the
+  connection and never replies, so the request times out — which, with retries
+  on, looks like an outage rather than a missing endpoint.
+
 ## 1.1.0 - 2026-08-05
 
 ### Added

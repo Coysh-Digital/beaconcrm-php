@@ -27,7 +27,7 @@ final class EntityTypeTest extends TestCase
         $fields = Fixture::supporterType()->fields();
 
         self::assertArrayNotHasKey('', $fields);
-        self::assertCount(23, $fields);
+        self::assertCount(24, $fields);
     }
 
     public function testFallsBackToTheKeyWhenNoLabelIsGiven(): void

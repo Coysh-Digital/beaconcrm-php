@@ -1,6 +1,7 @@
 {
   "results": [
     {
+      "id": 1001,
       "key": "supporter",
       "label": "Supporter",
       "fields": [
@@ -29,7 +30,18 @@
           "type": "select",
           "metadata": { "allow_multiple": true, "options": ["Email", "Post", "SMS"] }
         },
-        { "key": "c_branch", "label": "Branch", "type": "reference" },
+        {
+          "key": "c_branch",
+          "label": "Branch",
+          "type": "reference",
+          "metadata": { "entity_types": [1002], "allow_multiple": false }
+        },
+        {
+          "key": "c_visited_branches",
+          "label": "Branches visited",
+          "type": "reference",
+          "metadata": { "entity_types": [1002, 1001], "allow_multiple": true }
+        },
         { "key": "attachments", "label": "Attachments", "type": "file" },
         { "key": "address", "label": "Address", "type": "location" },
         { "key": "owner", "label": "Owner", "type": "user" },
@@ -41,6 +53,7 @@
       ]
     },
     {
+      "id": 1002,
       "key": "branch",
       "label": "Branch",
       "fields": [

@@ -61,14 +61,22 @@ final class Field
         public readonly bool $isSmartField,
         public readonly bool $isRollupField,
         public readonly array $metadata,
+        /** @var list<string> */
+        private readonly array $linksTo = [],
     ) {
     }
 
     /**
      * @param array<string, mixed> $data One entry from an entity type's
      *                                   `fields` array.
+     * @param array<int, string> $typeKeysById Record type keys by numeric ID.
+     *                                         Beacon names a link's target types
+     *                                         by ID, so without this map
+     *                                         {@see linksTo()} has nothing to
+     *                                         resolve them against and returns
+     *                                         an empty list.
      */
-    public static function fromArray(array $data): ?self
+    public static function fromArray(array $data, array $typeKeysById = []): ?self
     {
         $key = $data['key'] ?? null;
         $rawType = $data['type'] ?? null;
@@ -81,6 +89,15 @@ final class Field
 
         $label = $data['label'] ?? null;
         $metadata = $data['metadata'] ?? [];
+        $metadata = is_array($metadata) ? $metadata : [];
+
+        $linksTo = [];
+
+        foreach (self::targetIdsIn($metadata) as $id) {
+            if (isset($typeKeysById[$id])) {
+                $linksTo[] = $typeKeysById[$id];
+            }
+        }
 
         return new self(
             key: $key,
@@ -90,8 +107,29 @@ final class Field
             isReadOnly: (bool)($data['is_read_only'] ?? false),
             isSmartField: (bool)($data['is_smart_field'] ?? false),
             isRollupField: (bool)($data['is_rollup_field'] ?? false),
-            metadata: is_array($metadata) ? $metadata : [],
+            metadata: $metadata,
+            linksTo: array_values(array_unique($linksTo)),
         );
+    }
+
+    /**
+     * The numeric record type IDs a link field may point at.
+     *
+     * @param array<string, mixed> $metadata
+     * @return list<int>
+     */
+    private static function targetIdsIn(array $metadata): array
+    {
+        $ids = $metadata['entity_types'] ?? [];
+
+        if (!is_array($ids)) {
+            return [];
+        }
+
+        return array_values(array_map(
+            static fn(mixed $id): int => (int)$id,
+            array_filter($ids, static fn(mixed $id): bool => is_numeric($id)),
+        ));
     }
 
     /**
@@ -160,6 +198,43 @@ final class Field
             array_map(static fn(mixed $option): string => (string)$option, $options),
             static fn(string $option): bool => $option !== '',
         ));
+    }
+
+    /**
+     * Whether this field links to other records.
+     */
+    public function isReference(): bool
+    {
+        return $this->type === FieldType::Reference;
+    }
+
+    /**
+     * The keys of the record types this link may point at.
+     *
+     * Beacon enforces this: a link given the ID of a record of any other type
+     * is rejected with `One of the referenced entities is not one of the
+     * allowed types`, quoting the numeric IDs rather than the keys.
+     *
+     * Empty for a field that is not a link, and for one parsed without the
+     * account's id-to-key map — see {@see fromArray()}. Use
+     * {@see linksToIds()} when only the raw IDs are needed.
+     *
+     * @return list<string>
+     */
+    public function linksTo(): array
+    {
+        return $this->isReference() ? $this->linksTo : [];
+    }
+
+    /**
+     * The numeric record type IDs this link may point at, as Beacon reports
+     * them.
+     *
+     * @return list<int>
+     */
+    public function linksToIds(): array
+    {
+        return $this->isReference() ? self::targetIdsIn($this->metadata) : [];
     }
 
     /**
